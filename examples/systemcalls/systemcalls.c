@@ -1,4 +1,10 @@
 #include "systemcalls.h"
+#include <unistd.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
 
 /**
  * @param cmd the command to execute with system()
@@ -16,8 +22,35 @@ bool do_system(const char *cmd)
  *   and return a boolean true if the system() call completed with success
  *   or false() if it returned a failure
 */
+    if (cmd == NULL) {
+        printf("Command is NULL\n");
+    } else {
+        int wstatus = system(cmd);
+        if (wstatus == -1) {
+            printf("Call to system failed - %s\n", strerror(errno));
+        } else if (wstatus == 127) {
+            printf("Child of system call could not execute a shell\n");
+        } else {
+            if (WIFEXITED(wstatus)) {
+                int exitStatus = WEXITSTATUS(wstatus);
+                printf("Child of system call exited with status %d\n", exitStatus);
+                if (exitStatus == 0) {
+                    return true;
+                }
+            } else if (WIFSIGNALED(wstatus)) {
+                printf("Child of system call terminated by signal %d\n", WTERMSIG(wstatus));
+                if (WCOREDUMP(wstatus)) {
+                    printf("Child of system call produced a core dump\n");
+                }
+            } else if (WIFCONTINUED(wstatus)) {
+                printf("Child of system call was continued...\n");
+            } else {
+                printf("Unexpected return value from call to system\n");
+            }
+        }
+    }
 
-    return true;
+    return false;
 }
 
 /**
@@ -36,6 +69,7 @@ bool do_system(const char *cmd)
 
 bool do_exec(int count, ...)
 {
+    bool result = false;
     va_list args;
     va_start(args, count);
     char * command[count+1];
@@ -47,7 +81,7 @@ bool do_exec(int count, ...)
     command[count] = NULL;
     // this line is to avoid a compile warning before your implementation is complete
     // and may be removed
-    command[count] = command[count];
+    //command[count] = command[count];
 
 /*
  * TODO:
@@ -58,10 +92,56 @@ bool do_exec(int count, ...)
  *   as second argument to the execv() command.
  *
 */
+    pid_t pid = fork();
+    int ret = -1;
+
+    if (pid == -1) {
+        printf("Error forking - %s\n", strerror(errno));
+    } else if (pid == 0) {
+        // Child process
+        pid_t pid = getpid();
+        printf("[%d] Child process spawned\n", pid);
+        for(int i=0; i<count; i++)
+        {
+            printf("[%d] arg[%d] %s\n", pid, i, command[i]);
+        }
+        ret = execv(command[0], &command[0]);
+        if (ret == -1) {
+            printf("[%d] Error calling execv - %s\n", pid, strerror(errno));
+        }
+        exit(EXIT_FAILURE);
+    } else {
+        // Parent process
+        int wstatus = 0;
+        ret = waitpid(pid, &wstatus, 0);
+        if (ret == pid) {
+            // Wait success, return value same as child pid
+            printf("Wait on child process succeeded\n");
+            if (WIFEXITED(wstatus)) {
+                int exitStatus = WEXITSTATUS(wstatus);
+                printf("Child exited w/ status %d\n", exitStatus);
+                if (exitStatus == 0) {
+                    result = true;
+                }
+            } else if (WIFSIGNALED(wstatus)) {
+                printf("Child terminated by signal %d\n", WTERMSIG(wstatus));
+                if (WCOREDUMP(wstatus)) {
+                    printf("Child produced a core dump\n");
+                }
+            } else if (WIFCONTINUED(wstatus)) {
+                printf("Child was continued...\n");
+            }
+
+        } else if (ret == -1) {
+            printf("Error waiting for child process - %s\n", strerror(errno));
+        } else {
+            printf("Unexpected return code from call to wait\n");
+        }
+    }
 
     va_end(args);
 
-    return true;
+    return result;
 }
 
 /**
@@ -71,6 +151,7 @@ bool do_exec(int count, ...)
 */
 bool do_exec_redirect(const char *outputfile, int count, ...)
 {
+    bool result = false;
     va_list args;
     va_start(args, count);
     char * command[count+1];
@@ -82,7 +163,7 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     command[count] = NULL;
     // this line is to avoid a compile warning before your implementation is complete
     // and may be removed
-    command[count] = command[count];
+    //command[count] = command[count];
 
 
 /*
@@ -92,8 +173,62 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *
 */
+    int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+    if (fd == -1) {
+        printf("Error calling open - %s\n", strerror(errno));
+    } else {
+        pid_t pid = fork();
+        if (pid == -1) {
+            printf("Error forking - %s\n", strerror(errno));
+        } else if (pid == 0) {
+            // Child process
+            pid_t pid = getpid();
+            printf("[%d] Child process spawned\n", pid);
+            for(int i=0; i<count; i++)
+            {
+                printf("[%d] arg[%d] %s\n", pid, i, command[i]);
+            }
+            if (dup2(fd, 1) < 0) { 
+                perror("dup2");
+                close(fd);
+                exit(EXIT_FAILURE);
+            }
+            close(fd);
+            execv(command[0], &command[0]); 
+            perror("execvp"); 
+            exit(EXIT_FAILURE);
+        } else {
+            // Parent process
+            close(fd);
+            int wstatus = 0;
+            int ret = waitpid(pid, &wstatus, 0);
+            if (ret == pid) {
+                // Wait success, return value same as child pid
+                printf("Wait on child process succeeded\n");
+                if (WIFEXITED(wstatus)) {
+                    int exitStatus = WEXITSTATUS(wstatus);
+                    printf("Child exited w/ status %d\n", exitStatus);
+                    if (exitStatus == 0) {
+                        result = true;
+                    }
+                } else if (WIFSIGNALED(wstatus)) {
+                    printf("Child terminated by signal %d\n", WTERMSIG(wstatus));
+                    if (WCOREDUMP(wstatus)) {
+                        printf("Child produced a core dump\n");
+                    }
+                } else if (WIFCONTINUED(wstatus)) {
+                    printf("Child was continued...\n");
+                }
+
+            } else if (ret == -1) {
+                printf("Error waiting for child process - %s\n", strerror(errno));
+            } else {
+                printf("Unexpected return code from call to wait\n");
+            }
+        }
+    }
 
     va_end(args);
 
-    return true;
+    return result;
 }
