@@ -1,11 +1,7 @@
 .PHONY: clean
 
-ifeq ($(CROSS_COMPILE),)
-   CC=gcc
-else
-   CC=$(CROSS_COMPILE)-gcc
-endif
 
+CC=$(CROSS_COMPILE)gcc
 APP_NAME=writer
 BASE_DIR=$(realpath .)
 BUILD_DIR=$(BASE_DIR)
