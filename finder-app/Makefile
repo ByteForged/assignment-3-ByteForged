@@ -1,4 +1,4 @@
-.PHONY: clean
+.PHONY: clean all
 
 
 CC=$(CROSS_COMPILE)gcc
@@ -13,7 +13,7 @@ LDFLAGS=
 CFLAGS=
 VPATH = $(SRC_DIRS)
 
-app: ${BUILD_DIR} $(OBJ_FILES)
+all: ${BUILD_DIR} $(OBJ_FILES)
 	$(CC) -o $(BUILD_DIR)/$(APP_NAME) $(OBJ_FILES)
 	@echo "Done building writer app"
 
